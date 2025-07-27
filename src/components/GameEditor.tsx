@@ -48,10 +48,37 @@ const GameEditor: React.FC<GameEditorProps> = ({ selectedTemplate, editingProjec
   }, [selectedTemplate, editingProject]);
 
   // Load AI generated assets and apply them to objects
-  useEffect(() => {
-    const editorAssets = JSON.parse(localStorage.getItem('editorAssets') || '[]');
-    // Assets are now available for use in the editor
-  }, []);
+  // === Apply AI/Imported assets to the selected (or last created) object ===
+useEffect(() => {
+  const handler = (e: any) => {
+    const { asset } = e.detail || {};
+    if (!asset) return;
+
+    // Prefer currently selected object, else last one created
+    const target = selectedObject || gameObjects[gameObjects.length - 1];
+    if (!target) return;
+
+    const updates: Partial<GameObject> = {};
+    switch (asset.type) {
+      case 'image':
+      case 'texture':
+        updates.texture = asset.url;
+        break;
+      case 'sound':
+        updates.sound = asset.url;
+        break;
+      case 'model':
+        updates.model = asset.url;
+        break;
+    }
+
+    updateObject(target.id, updates);
+  };
+
+  window.addEventListener('applyAsset', handler);
+  return () => window.removeEventListener('applyAsset', handler);
+}, [selectedObject, gameObjects]);
+
 
   // Enhanced keyboard controls
   useEffect(() => {
@@ -226,7 +253,7 @@ const GameEditor: React.FC<GameEditorProps> = ({ selectedTemplate, editingProjec
     modal.innerHTML = `
       <div class="relative w-full h-full max-w-7xl max-h-[95vh] bg-gray-900 rounded-lg overflow-hidden">
         <div class="absolute top-4 right-4 z-10 flex gap-2">
-          <button onclick="document.getElementById('game-frame').contentWindow.location.reload()" 
+          <button onclick="document.getElementById('game-frame').contentWindow.postMessage('restartGame', '*')" 
                   class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium">
             🔄 Restart
           </button>
@@ -495,11 +522,23 @@ const GameEditor: React.FC<GameEditorProps> = ({ selectedTemplate, editingProjec
                 obj.className = 'object ' + objData.type;
                 obj.style.width = (objData.scale.x * 50) + 'px';
                 obj.style.height = (objData.scale.y * 50) + 'px';
+                obj.style.position = 'absolute';
                 obj.style.left = (objData.position.x * 50 + window.innerWidth / 2) + 'px';
                 obj.style.top = (window.innerHeight / 2 - objData.position.y * 50) + 'px';
-                obj.style.backgroundColor = objData.color;
-                obj.style.transform = \`rotateX(\${objData.rotation.x}deg) rotateY(\${objData.rotation.y}deg) rotateZ(\${objData.rotation.z}deg)\`;
-                
+                if (
+  objData.texture &&
+  (objData.texture.startsWith('data:image') || objData.texture.startsWith('http'))
+) {
+  obj.style.backgroundImage = "url('" + objData.texture + "')";
+  obj.style.backgroundSize = 'cover';
+  obj.style.backgroundPosition = 'center';
+  obj.style.backgroundRepeat = 'no-repeat';
+  obj.style.backgroundColor = 'transparent';
+} else {
+  obj.style.backgroundImage = 'none';
+  obj.style.backgroundColor = objData.color || 'gray';
+}
+
                 canvas.appendChild(obj);
                 
                 const gameObj = {
@@ -531,6 +570,17 @@ const GameEditor: React.FC<GameEditorProps> = ({ selectedTemplate, editingProjec
             document.getElementById('time').textContent = elapsed;
             setTimeout(updateTimer, 1000);
         }
+            function playObjectSound(objData) {
+  if (!objData.sound) return;
+
+  const audio = new Audio(objData.sound);
+  audio.loop = true;
+  audio.volume = 0.8;
+  audio.play().catch(err => {
+    console.warn("Audio play error:", err);
+  });
+}
+
 
         function createParticle(x, y, color = '#ffd700') {
             const particle = document.createElement('div');
@@ -898,8 +948,43 @@ const GameEditor: React.FC<GameEditorProps> = ({ selectedTemplate, editingProjec
         }
 
         function restartGame() {
-            location.reload();
+            // Reset all game variables
+            score = 0;
+            health = 100;
+            coins = 0;
+            power = 0;
+            gameRunning = true;
+            player = null;
+            objects = [];
+            bullets = [];
+            keys = {};
+            startTime = Date.now();
+            camera = { x: 0, y: 0 };
+            
+            // Clear the canvas
+            const canvas = document.getElementById('game-canvas');
+            canvas.innerHTML = '';
+            
+            // Hide result screen
+            document.getElementById('result').style.display = 'none';
+            
+            // Reset UI elements
+            document.getElementById('score').textContent = '0';
+            document.getElementById('health').textContent = '100';
+            document.getElementById('coins').textContent = '0';
+            document.getElementById('power').textContent = '0';
+            document.getElementById('time').textContent = '0';
+            
+            // Re-initialize the game
+            initGame();
         }
+        
+        // Listen for messages from parent window
+        window.addEventListener('message', function(event) {
+            if (event.data === 'restartGame') {
+                restartGame();
+            }
+        });
 
         window.addEventListener('load', initGame);
     </script>
